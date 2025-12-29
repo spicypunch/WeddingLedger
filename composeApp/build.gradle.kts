@@ -1,4 +1,5 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -9,6 +10,16 @@ plugins {
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
 }
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        load(localPropertiesFile.inputStream())
+    }
+}
+
+val supabaseUrl: String = localProperties.getProperty("SUPABASE_URL") ?: ""
+val supabaseAnonKey: String = localProperties.getProperty("SUPABASE_ANON_KEY") ?: ""
 
 kotlin {
     androidTarget {
@@ -81,6 +92,15 @@ kotlin {
             
             // Coroutines
             implementation(libs.kotlinx.coroutines.core)
+            
+            // Supabase
+            implementation(project.dependencies.platform(libs.supabase.bom))
+            implementation(libs.supabase.postgrest)
+            implementation(libs.supabase.auth)
+            implementation(libs.supabase.realtime)
+            
+            // Kotlinx Datetime
+            implementation(libs.kotlinx.datetime)
         }
         
         commonTest.dependencies {
@@ -127,4 +147,38 @@ dependencies {
 
 room {
     schemaDirectory("$projectDir/schemas")
+}
+
+val generateBuildConfig by tasks.registering(Sync::class) {
+    val outputDir = layout.buildDirectory.dir("generated/buildconfig/kr/jm/weddingledger/core/config")
+    
+    from(resources.text.fromString(
+        """
+        package kr.jm.weddingledger.core.config
+        
+        object BuildConfig {
+            const val SUPABASE_URL = "$supabaseUrl"
+            const val SUPABASE_ANON_KEY = "$supabaseAnonKey"
+        }
+        """.trimIndent()
+    )) {
+        rename { "BuildConfig.kt" }
+    }
+    into(outputDir)
+}
+
+kotlin.sourceSets.commonMain {
+    kotlin.srcDir(layout.buildDirectory.dir("generated/buildconfig"))
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    dependsOn(generateBuildConfig)
+}
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinNativeCompile>().configureEach {
+    dependsOn(generateBuildConfig)
+}
+
+tasks.matching { it.name.startsWith("ksp") }.configureEach {
+    dependsOn(generateBuildConfig)
 }
